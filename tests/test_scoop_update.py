@@ -260,9 +260,40 @@ def _sweep_args(**overrides) -> argparse.Namespace:
     return args
 
 
+# Identity used only to build the fixture's own baseline commit. Deliberately
+# NOT written into the repo config, so the fixture mirrors a CI runner: no
+# identity anywhere, which is exactly the condition that made `git commit` exit
+# 128 ("Author identity unknown") on GitHub Actions.
+FIXTURE_IDENTITY = ("-c", "user.name=fixture", "-c", "user.email=fixture@example.com")
+
+def _isolate_git_identity(monkeypatch, tmp_path: Path) -> None:
+    """Point git at an empty identity world.
+
+    Without this the developer's own ~/.gitconfig satisfies `git commit` and a
+    missing-identity regression passes locally while failing on the runner.
+    """
+    empty_home = tmp_path / "no-identity-home"
+    empty_home.mkdir(exist_ok=True)
+    missing = tmp_path / "definitely-absent-gitconfig"
+    for var in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME"):
+        monkeypatch.setenv(var, str(empty_home))
+    for var in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
+        monkeypatch.setenv(var, str(missing))
+    # A committed identity would survive in the environment too.
+    for var in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
+                "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 def bucket_repo(tmp_path, monkeypatch):
-    """A throwaway repo with a local bare remote, pre-loaded with vx.json."""
+    """A throwaway repo with a local bare remote, pre-loaded with vx.json.
+
+    The repo is intentionally left with NO configured identity (neither local
+    nor global), matching a CI runner. sweep() must therefore supply its own.
+    """
+    _isolate_git_identity(monkeypatch, tmp_path)
+
     origin = tmp_path / "origin.git"
     _git("init", "--bare", str(origin), cwd=tmp_path)
 
@@ -270,14 +301,12 @@ def bucket_repo(tmp_path, monkeypatch):
     repo.mkdir()
     _git("init", "-q", cwd=repo)
     _git("symbolic-ref", "HEAD", "refs/heads/main", cwd=repo)
-    _git("config", "user.email", "bot@example.com", cwd=repo)
-    _git("config", "user.name", "bot", cwd=repo)
 
     bucket = repo / "bucket"
     bucket.mkdir()
     (bucket / "vx.json").write_text(json.dumps(SWEEP_MANIFEST, indent=4) + "\n", encoding="utf-8")
     _git("add", "bucket", cwd=repo)
-    _git("commit", "-q", "-m", "initial", cwd=repo)
+    _git(*FIXTURE_IDENTITY, "commit", "-q", "-m", "initial", cwd=repo)
     _git("remote", "add", "origin", str(origin), cwd=repo)
     _git("push", "-q", "-u", "origin", "main", cwd=repo)
 
@@ -322,6 +351,30 @@ def test_sweep_commits_the_rewritten_manifest(bucket_repo, monkeypatch):
     # The branch was really pushed, so a PR can be opened against it.
     remote = _git("ls-remote", "--heads", "origin", f"refs/heads/{SWEEP_BRANCH}", cwd=bucket_repo)
     assert SWEEP_BRANCH in remote.stdout
+
+
+def test_sweep_commits_with_its_own_identity(bucket_repo, monkeypatch):
+    """sweep() must commit on a machine that has no git identity at all.
+
+    CI runners have neither a global nor a local user.name/user.email, so a bare
+    `git commit` exits 128 ("Author identity unknown") there while passing on any
+    developer machine. The fixture strips every identity source, so this test
+    only passes if the commit supplies its own.
+    """
+    monkeypatch.setattr(su, "open_pr", lambda branch, title, body: None)
+
+    assert su.sweep(_sweep_args(push=True)) == 0
+
+    name = _git("log", "-1", "--format=%an", cwd=bucket_repo).stdout.strip()
+    email = _git("log", "-1", "--format=%ae", cwd=bucket_repo).stdout.strip()
+    assert (name, email) == ("loonghao", "hal.long@outlook.com")
+
+    # The identity must be passed per-invocation, not persisted into the repo.
+    local_identity = subprocess.run(
+        ["git", "config", "--local", "--get-regexp", "^user\\."],
+        cwd=bucket_repo, capture_output=True, text=True, check=False,
+    )
+    assert local_identity.returncode != 0, "sweep must not write identity into repo config"
 
 
 def test_sweep_dry_run_writes_nothing(bucket_repo, monkeypatch):
