@@ -1,0 +1,30 @@
+{
+    "version": "0.8.3",
+    "description": "Intelligent download accelerator with geographic detection and CDN quality assessment",
+    "homepage": "https://github.com/loonghao/turbo-cdn",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/loonghao/turbo-cdn/releases/download/v0.8.3/turbo-cdn-x86_64-pc-windows-msvc.zip",
+            "hash": "5c8b488d23b0af2f0131b26dd517a1afcdd583fb7aae543341277c97690547a6"
+        },
+        "arm64": {
+            "url": "https://github.com/loonghao/turbo-cdn/releases/download/v0.8.3/turbo-cdn-aarch64-pc-windows-msvc.zip",
+            "hash": "7397faa151f58cf833ec27859af90a04b42d378e728be1e8dbc031d553262630"
+        }
+    },
+    "bin": "turbo-cdn.exe",
+    "checkver": {
+        "github": "https://github.com/loonghao/turbo-cdn"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/loonghao/turbo-cdn/releases/download/v$version/turbo-cdn-x86_64-pc-windows-msvc.zip"
+            },
+            "arm64": {
+                "url": "https://github.com/loonghao/turbo-cdn/releases/download/v$version/turbo-cdn-aarch64-pc-windows-msvc.zip"
+            }
+        }
+    }
+}

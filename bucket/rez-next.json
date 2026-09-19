@@ -1,0 +1,38 @@
+{
+    "version": "0.3.6",
+    "description": "Experimental Rust rewrite of Rez package manager core components",
+    "homepage": "https://github.com/loonghao/rez-next",
+    "license": "Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/loonghao/rez-next/releases/download/v0.3.6/rez-next-x86_64-pc-windows-msvc.zip",
+            "hash": "4041db25d6c8f9452a643322d241a03a4c155f31466678df6104b8d8219c3b12"
+        }
+    },
+    "bin": [
+        [
+            "target/x86_64-pc-windows-msvc/release/rez-next.exe",
+            "rez-next"
+        ]
+    ],
+    "checkver": {
+        "github": "https://github.com/loonghao/rez-next"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/loonghao/rez-next/releases/download/v$version/rez-next-x86_64-pc-windows-msvc.zip"
+            }
+        }
+    },
+    "notes": [
+        "rez-next is experimental and not intended for production use.",
+        "",
+        "Only the x86_64 Windows build is published here: the arm64 archive nests its",
+        "binaries under a different per-architecture path, so a single manifest cannot",
+        "address both without per-architecture extract_dir support.",
+        "",
+        "The archive also ships rez.exe. It is deliberately NOT shimmed as `rez` to",
+        "avoid shadowing a real rez installation; run it from the app directory if needed."
+    ]
+}

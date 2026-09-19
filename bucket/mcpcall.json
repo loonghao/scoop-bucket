@@ -1,0 +1,24 @@
+{
+    "version": "0.4.1",
+    "description": "CLI for listing and calling MCP server tools over stdio or Streamable HTTP",
+    "homepage": "https://github.com/loonghao/mcpcall",
+    "license": "MIT OR Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/loonghao/mcpcall/releases/download/mcpcall-v0.4.1/mcpcall-0.4.1-x86_64-pc-windows-msvc.zip",
+            "hash": "126a40f158fe6d3a61bfbabfb0fa93384813660f497856f2ca6b8070caff1b9c"
+        }
+    },
+    "bin": "mcpcall.exe",
+    "checkver": {
+        "github": "https://github.com/loonghao/mcpcall",
+        "regex": "^mcpcall-v([\\d.]+)$"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/loonghao/mcpcall/releases/download/mcpcall-v$version/mcpcall-$version-x86_64-pc-windows-msvc.zip"
+            }
+        }
+    }
+}
