@@ -121,6 +121,45 @@ def test_apply_autoupdate_requires_autoupdate_block():
         su.apply_autoupdate({"version": "1.0.0"}, "2.0.0")
 
 
+def test_resolve_hash_surfaces_network_errors(monkeypatch):
+    """Non-HTTP network failures must not escape as raw tracebacks.
+
+    Patched at urlopen so the real download_sha256 wrapper is exercised, rather
+    than replacing that wrapper itself.
+    """
+    import socket
+    import urllib.error
+    import urllib.request
+
+    manifest = {
+        "version": "1.0.0",
+        "architecture": {"64bit": {"url": "https://x/1.0.0/a.zip", "hash": "b" * 64}},
+        "autoupdate": {"architecture": {"64bit": {"url": "https://x/$version/a.zip"}}},
+    }
+    for exc in (
+        urllib.error.URLError("dns failure"),
+        socket.timeout("timed out"),
+        TimeoutError("timed out"),
+        OSError(104, "connection reset by peer"),
+    ):
+        monkeypatch.setattr(
+            urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(exc)
+        )
+        with pytest.raises(su.SweepError):
+            su.apply_autoupdate(manifest, "2.0.0")
+
+
+def test_download_sha256_wraps_oserror(monkeypatch):
+    import urllib.request
+
+    def boom(*a, **k):
+        raise OSError(104, "connection reset by peer")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    with pytest.raises(su.SweepError):
+        su.download_sha256("https://x/a.zip")
+
+
 # --------------------------------------------------------------------------- #
 # the shipped manifests
 # --------------------------------------------------------------------------- #

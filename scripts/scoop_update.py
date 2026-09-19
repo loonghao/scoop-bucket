@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import socket
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -64,6 +65,11 @@ def _request(url: str) -> bytes:
             return resp.read()
     except urllib.error.HTTPError as exc:  # pragma: no cover - network
         raise SweepError(f"GET {url} -> HTTP {exc.code}") from exc
+    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
+        # HTTPError is a URLError subclass and is handled above; this covers DNS
+        # failures, refused/reset connections and timeouts, which would otherwise
+        # escape sweep() and abort the whole run mid-way.
+        raise SweepError(f"GET {url} -> {type(exc).__name__}: {exc}") from exc
 
 
 def parse_repo(spec: str) -> tuple[str, str]:
@@ -134,15 +140,18 @@ def latest_version(manifest: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 def download_sha256(url: str) -> str:
     digest = hashlib.sha256()
-    with urllib.request.urlopen(
-        urllib.request.Request(url, headers={"User-Agent": "loonghao-scoop-bucket-autoupdate"}),
-        timeout=600,
-    ) as resp:
-        while True:
-            block = resp.read(CHUNK)
-            if not block:
-                break
-            digest.update(block)
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request(url, headers={"User-Agent": "loonghao-scoop-bucket-autoupdate"}),
+            timeout=600,
+        ) as resp:
+            while True:
+                block = resp.read(CHUNK)
+                if not block:
+                    break
+                digest.update(block)
+    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
+        raise SweepError(f"download {url} -> {type(exc).__name__}: {exc}") from exc
     return digest.hexdigest()
 
 
@@ -237,23 +246,41 @@ def commit_changes(branch: str, message: str) -> bool:
 
 
 def existing_pr(branch: str) -> str | None:
-    probe = git("branch", "--remotes", "--list", f"origin/{branch}", check=False)
-    if probe.returncode != 0 or not probe.stdout.strip():
-        return None
+    """Return the URL of the open PR for *branch*, or None.
+
+    Queried through the API rather than from local git state, so it works on a
+    fresh checkout and can be called before anything is written.
+    """
     found = subprocess.run(
         ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url"],
         capture_output=True,
         text=True,
         check=False,
     )
-    url = found.stdout.strip()
-    return url or None
+    return found.stdout.strip() or None
+
+
+def push_branch(branch: str) -> None:
+    """Push *branch*, refreshing it when it already exists on the remote.
+
+    An autoupdate branch is owned by this workflow, so replacing its content is
+    safe. --force-with-lease is used instead of a bare force so a concurrent
+    push by anyone else is still refused.
+    """
+    remote_has_branch = bool(git("ls-remote", "--heads", "origin", f"refs/heads/{branch}", check=False).stdout.strip())
+    if remote_has_branch:
+        git("fetch", "origin", branch, check=False)
+        pushed = git("push", "--force-with-lease", "origin", branch, check=False)
+    else:
+        pushed = git("push", "-u", "origin", branch, check=False)
+    if pushed.returncode != 0:
+        raise SweepError(f"push failed: {pushed.stderr.strip()}")
 
 
 def open_pr(branch: str, title: str, body: str) -> None:
     already = existing_pr(branch)
     if already:
-        print(f"  pull request already open: {already}")
+        print(f"  existing pull request refreshed: {already}")
         return
     result = subprocess.run(
         ["gh", "pr", "create", "--base", "main", "--head", branch, "--title", title, "--body", body],
@@ -262,14 +289,44 @@ def open_pr(branch: str, title: str, body: str) -> None:
         check=False,
     )
     if result.returncode != 0:
-        print(f"  gh pr create failed: {result.stderr.strip()}")
-        return
+        # Surface the failure: a pushed branch with no PR is invisible, and a
+        # green job here would hide that.
+        raise SweepError(f"gh pr create failed: {result.stderr.strip()}")
     print(f"  opened pull request: {result.stdout.strip()}")
 
 
 # --------------------------------------------------------------------------- #
 # sweep
 # --------------------------------------------------------------------------- #
+def check_hashes(args: argparse.Namespace) -> int:
+    """Re-download every pinned asset and confirm the pinned hash still matches.
+
+    The normal sweep only computes hashes when a version actually changes, so a
+    hand-written manifest with a wrong hash would otherwise pass every gate and
+    only fail at `scoop install` time.
+    """
+    manifests = sorted(BUCKET_DIR.glob("*.json"))
+    if args.only:
+        wanted = {name.strip() for name in args.only.split(",") if name.strip()}
+        manifests = [p for p in manifests if p.stem in wanted]
+
+    failed = 0
+    for path in manifests:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        for arch, spec in sorted((manifest.get("architecture") or {}).items()):
+            url, pinned = spec.get("url"), spec.get("hash")
+            if not url or not pinned:
+                continue
+            actual = download_sha256(url)
+            status = "ok" if actual == pinned else "MISMATCH"
+            if actual != pinned:
+                failed += 1
+            print(f"[{path.stem}/{arch}] {status}  {url}\n    pinned={pinned}\n    actual={actual}")
+
+    print(f"\nhash check: {len(manifests)} manifests, {failed} mismatch(es)")
+    return 1 if failed else 0
+
+
 def sweep(args: argparse.Namespace) -> int:
     manifests = sorted(BUCKET_DIR.glob("*.json"))
     if args.only:
@@ -325,9 +382,9 @@ def sweep(args: argparse.Namespace) -> int:
             print("  dry-run: manifest not written")
             continue
 
+        # Writing is deferred until the branch is prepared, so that switching
+        # branches cannot clash with metadata already modified on disk.
         pending.append((path, updated, changes))
-        write_manifest(path, updated)
-        print(f"  wrote {path.name}")
 
     if args.dry_run or not pending:
         print("\nsweep complete (no files changed)")
@@ -354,15 +411,20 @@ def sweep(args: argparse.Namespace) -> int:
         ]
     )
 
+    # Checked before writing so a sweep for an already-open PR refreshes that
+    # PR instead of failing to push or silently doing nothing.
+    open_pr_url = existing_pr(branch)
+
     if not commit_changes(branch, f"chore(scoop): update {versions}"):
         return 0
 
     if args.push:
-        pushed = git("push", "-u", "origin", branch, check=False)
-        if pushed.returncode != 0:
-            print(f"  push failed: {pushed.stderr.strip()}")
+        try:
+            push_branch(branch)
+            open_pr(branch, title, body)
+        except SweepError as exc:
+            print(f"  ERROR {exc}")
             return 1
-        open_pr(branch, title, body)
     else:
         print(f"  committed on branch {branch} (pass --push to publish)")
     return 0
@@ -374,7 +436,13 @@ def main() -> int:
     parser.add_argument("--only", default="", help="comma-separated manifest names to sweep")
     parser.add_argument("--push", action="store_true", help="push the update branch and open a PR")
     parser.add_argument("--allow-downgrade", action="store_true", help="allow moving to an older upstream version")
-    return sweep(parser.parse_args())
+    parser.add_argument(
+        "--check-hashes",
+        action="store_true",
+        help="re-download every pinned asset and verify the recorded hash",
+    )
+    args = parser.parse_args()
+    return check_hashes(args) if args.check_hashes else sweep(args)
 
 
 if __name__ == "__main__":
