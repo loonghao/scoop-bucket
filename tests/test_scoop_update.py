@@ -5,7 +5,9 @@ Run with:  python -m pytest tests/ -q
 
 from __future__ import annotations
 
+import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -212,3 +214,162 @@ def test_manifest_repo_is_reachable(path):
     owner, repo = su.checkver_repo(m)
     assert owner == "loonghao"
     assert repo
+
+
+# --------------------------------------------------------------------------- #
+# the write path (sweep -> branch -> write -> commit -> push -> PR)
+# --------------------------------------------------------------------------- #
+# These exercise sweep() end to end against a throwaway git repository with a
+# local bare remote. They exist because every other check is structurally
+# incapable of covering the write path: --dry-run never writes by design, the
+# unit tests above call apply_autoupdate() (which returns a dict) and never
+# sweep(), and --check-hashes is read-only. A sweep that computes the new
+# version and hash and then silently writes nothing still exits 0, so only an
+# assertion that reads the file back from disk can catch it.
+
+SWEEP_MANIFEST = {
+    "version": "0.9.31",
+    "description": "fixture app",
+    "homepage": "https://github.com/loonghao/vx",
+    "license": "MIT",
+    "checkver": {"github": "loonghao/vx"},
+    "architecture": {"64bit": {"url": "https://example.test/$version/a.zip", "hash": "b" * 64}},
+    "autoupdate": {"architecture": {"64bit": {"url": "https://example.test/$version/a.zip"}}},
+    "bin": "vx.exe",
+}
+
+SWEEP_BRANCH = "scoop-autoupdate/vx"
+
+
+def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+    )
+
+
+def _sweep_args(**overrides) -> argparse.Namespace:
+    args = argparse.Namespace(
+        dry_run=False,
+        only="",
+        push=True,
+        allow_downgrade=False,
+        check_hashes=False,
+    )
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
+
+
+@pytest.fixture
+def bucket_repo(tmp_path, monkeypatch):
+    """A throwaway repo with a local bare remote, pre-loaded with vx.json."""
+    origin = tmp_path / "origin.git"
+    _git("init", "--bare", str(origin), cwd=tmp_path)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git("init", "-q", cwd=repo)
+    _git("symbolic-ref", "HEAD", "refs/heads/main", cwd=repo)
+    _git("config", "user.email", "bot@example.com", cwd=repo)
+    _git("config", "user.name", "bot", cwd=repo)
+
+    bucket = repo / "bucket"
+    bucket.mkdir()
+    (bucket / "vx.json").write_text(json.dumps(SWEEP_MANIFEST, indent=4) + "\n", encoding="utf-8")
+    _git("add", "bucket", cwd=repo)
+    _git("commit", "-q", "-m", "initial", cwd=repo)
+    _git("remote", "add", "origin", str(origin), cwd=repo)
+    _git("push", "-q", "-u", "origin", "main", cwd=repo)
+
+    # sweep() runs git in the process cwd and reads manifests from BUCKET_DIR.
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(su, "BUCKET_DIR", bucket)
+    # Only the network and `gh` are stubbed; every git call is real.
+    monkeypatch.setattr(su, "latest_version", lambda manifest: "0.9.32")
+    monkeypatch.setattr(su, "download_sha256", lambda url: "a" * 64)
+    monkeypatch.setattr(su, "existing_pr", lambda branch: None)
+    return repo
+
+
+def test_sweep_writes_manifest_to_disk(bucket_repo, monkeypatch):
+    """The regression that motivated these tests: sweep must persist updates.
+
+    An earlier revision deferred the write to "when the branch is prepared" and
+    never implemented it, so the sweep reported an update, wrote nothing, and
+    exited 0. Assert on the file on disk, not on the returned dict.
+    """
+    opened: list[tuple[str, str]] = []
+    monkeypatch.setattr(su, "open_pr", lambda branch, title, body: opened.append((branch, title)))
+
+    assert su.sweep(_sweep_args(push=True)) == 0
+
+    on_disk = json.loads((bucket_repo / "bucket" / "vx.json").read_text(encoding="utf-8"))
+    assert on_disk["version"] == "0.9.32"
+    assert on_disk["architecture"]["64bit"]["url"] == "https://example.test/0.9.32/a.zip"
+    assert on_disk["architecture"]["64bit"]["hash"] == "a" * 64
+    assert opened == [(SWEEP_BRANCH, "chore(scoop): update vx to 0.9.32")]
+
+
+def test_sweep_commits_the_rewritten_manifest(bucket_repo, monkeypatch):
+    """The commit -- not just the working tree -- must carry the new version."""
+    monkeypatch.setattr(su, "open_pr", lambda branch, title, body: None)
+
+    assert su.sweep(_sweep_args(push=True)) == 0
+
+    committed = json.loads(_git("show", f"{SWEEP_BRANCH}:bucket/vx.json", cwd=bucket_repo).stdout)
+    assert committed["version"] == "0.9.32"
+
+    # The branch was really pushed, so a PR can be opened against it.
+    remote = _git("ls-remote", "--heads", "origin", f"refs/heads/{SWEEP_BRANCH}", cwd=bucket_repo)
+    assert SWEEP_BRANCH in remote.stdout
+
+
+def test_sweep_dry_run_writes_nothing(bucket_repo, monkeypatch):
+    monkeypatch.setattr(su, "open_pr", lambda branch, title, body: None)
+
+    assert su.sweep(_sweep_args(dry_run=True, push=True)) == 0
+
+    on_disk = json.loads((bucket_repo / "bucket" / "vx.json").read_text(encoding="utf-8"))
+    assert on_disk["version"] == "0.9.31"
+    assert SWEEP_BRANCH not in _git("branch", "--list", cwd=bucket_repo).stdout
+
+
+def test_sweep_without_updates_does_not_commit(bucket_repo, monkeypatch):
+    monkeypatch.setattr(su, "open_pr", lambda branch, title, body: None)
+    monkeypatch.setattr(su, "latest_version", lambda manifest: "0.9.31")  # already pinned
+
+    assert su.sweep(_sweep_args(push=True)) == 0
+
+    assert SWEEP_BRANCH not in _git("branch", "--list", cwd=bucket_repo).stdout
+
+
+def test_open_pr_reports_existing_pr_without_creating_one(monkeypatch):
+    monkeypatch.setattr(su, "existing_pr", lambda branch: "https://github.com/o/r/pull/1")
+
+    calls = []
+
+    class _Result:
+        returncode = 0
+        stdout = "https://github.com/o/r/pull/2"
+        stderr = ""
+
+    def _fake_run(*args, **kwargs):
+        calls.append(args)
+        return _Result()
+
+    monkeypatch.setattr(su.subprocess, "run", _fake_run)
+    su.open_pr("branch", "title", "body")
+    assert not calls, "gh pr create must not run when a PR already exists"
+
+
+def test_open_pr_raises_when_gh_create_fails(monkeypatch):
+    monkeypatch.setattr(su, "existing_pr", lambda branch: None)
+
+    class _Result:
+        returncode = 1
+        stdout = ""
+        stderr = "gh: not logged in"
+
+    monkeypatch.setattr(su.subprocess, "run", lambda *a, **k: _Result())
+    with pytest.raises(su.SweepError, match="gh pr create failed"):
+        su.open_pr("branch", "title", "body")

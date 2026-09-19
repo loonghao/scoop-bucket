@@ -232,8 +232,17 @@ def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], capture_output=True, text=True, check=check)
 
 
-def commit_changes(branch: str, message: str) -> bool:
+def prepare_branch(branch: str) -> None:
+    """Create or reset the update branch *before* any manifest is modified.
+
+    Branch switching and manifest writing are deliberately two steps: the sweep
+    must not touch files while it is still on the base branch, but it must also
+    write them before staging, or the commit would be empty.
+    """
     git("checkout", "-B", branch)
+
+
+def commit_changes(message: str) -> bool:
     git("add", "bucket")
     # `git diff --cached --quiet` exits 0 = nothing staged, 1 = staged changes,
     # so this probe must not raise on a non-zero status.
@@ -317,7 +326,14 @@ def check_hashes(args: argparse.Namespace) -> int:
             url, pinned = spec.get("url"), spec.get("hash")
             if not url or not pinned:
                 continue
-            actual = download_sha256(url)
+            try:
+                actual = download_sha256(url)
+            except SweepError as exc:
+                # Still fail the gate -- an unverifiable hash is not a passing
+                # hash -- but report it as an error instead of a traceback.
+                failed += 1
+                print(f"[{path.stem}/{arch}] ERROR  {url}\n    {exc}")
+                continue
             status = "ok" if actual == pinned else "MISMATCH"
             if actual != pinned:
                 failed += 1
@@ -411,11 +427,14 @@ def sweep(args: argparse.Namespace) -> int:
         ]
     )
 
-    # Checked before writing so a sweep for an already-open PR refreshes that
-    # PR instead of failing to push or silently doing nothing.
-    open_pr_url = existing_pr(branch)
+    # Switch branches first so the metadata rewrite cannot clash with the
+    # checkout, then persist every pending manifest, then stage and commit.
+    prepare_branch(branch)
+    for path, updated, _ in pending:
+        write_manifest(path, updated)
+        print(f"  wrote {path.name}")
 
-    if not commit_changes(branch, f"chore(scoop): update {versions}"):
+    if not commit_changes(f"chore(scoop): update {versions}"):
         return 0
 
     if args.push:
