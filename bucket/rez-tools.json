@@ -1,0 +1,36 @@
+{
+    "version": "1.0.0",
+    "description": "Command line suite for the Rez package manager",
+    "homepage": "https://github.com/loonghao/rez-tools",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/loonghao/rez-tools/releases/download/v1.0.0/rt-windows-x86_64.exe.tar.gz",
+            "hash": "5fc52d0bdfdccf457325350373f04915a7cdf557938520c06ef5ef23fe576b65"
+        }
+    },
+    "bin": [
+        [
+            "rt.exe",
+            "rt"
+        ],
+        [
+            "rt.exe",
+            "rez-tools"
+        ]
+    ],
+    "checkver": {
+        "github": "https://github.com/loonghao/rez-tools"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/loonghao/rez-tools/releases/download/v$version/rt-windows-x86_64.exe.tar.gz"
+            }
+        }
+    },
+    "notes": [
+        "The upstream binary is named rt.exe.",
+        "Both `rt` and `rez-tools` shims are installed and point at it."
+    ]
+}

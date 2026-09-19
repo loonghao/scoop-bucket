@@ -1,0 +1,127 @@
+name: Scoop Autoupdate
+
+# Polls each upstream repository's latest GitHub release and rewrites the
+# manifests under bucket/. A pull request is opened for review instead of
+# pushing to main directly.
+#
+# Polling (rather than listening for `release: published`) is deliberate:
+# release-please and `gh release edit --draft=false` publish through the API and
+# do not emit that event, which silently starves event-driven updaters.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report available updates without opening a PR'
+        type: boolean
+        default: false
+      only:
+        description: 'Comma-separated manifest names to sweep (empty = all)'
+        type: string
+        default: ''
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: scoop-autoupdate
+  cancel-in-progress: false
+
+jobs:
+  # Manifest changes are validated on every PR: unit tests, a full sweep in
+  # dry-run mode (proves each checkver resolves and every pinned version matches
+  # its upstream release), and a re-download check of every pinned hash.
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install test dependencies
+        run: python3 -m pip install --quiet pytest
+
+      - name: Run tests
+        run: python3 -m pytest tests/ -q
+
+      - name: Sweep manifests (dry run)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/scoop_update.py --dry-run
+
+      - name: Verify pinned hashes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/scoop_update.py --check-hashes
+
+  autoupdate:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Sweep manifests
+        env:
+          # Inputs are passed through the environment rather than interpolated
+          # into the shell script.
+          DRY_RUN: ${{ inputs.dry_run }}
+          ONLY: ${{ inputs.only }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${DRY_RUN}" = "true" ]; then
+            args+=(--dry-run)
+          else
+            args+=(--push)
+          fi
+          if [ -n "${ONLY}" ]; then
+            args+=(--only "${ONLY}")
+          fi
+          python3 scripts/scoop_update.py "${args[@]}"
+
+      - name: Summary
+        if: always()
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          ONLY: ${{ inputs.only }}
+        run: |
+          {
+            echo "## Scoop autoupdate sweep"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---------|-------|"
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "| Mode | dry run |"
+            else
+              echo "| Mode | push + PR |"
+            fi
+            if [ -n "${ONLY}" ]; then
+              echo "| Scope | ${ONLY} |"
+            else
+              echo "| Scope | all manifests |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

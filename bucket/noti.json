@@ -1,0 +1,23 @@
+{
+    "version": "0.1.10",
+    "description": "Unified multi-channel notification CLI for AI agents",
+    "homepage": "https://github.com/loonghao/noti",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/loonghao/noti/releases/download/v0.1.10/noti-x86_64-pc-windows-msvc.zip",
+            "hash": "c6c1d43cb9b4594d73e87e5076d37e614c107fd829af561db41bc092eee49f4a"
+        }
+    },
+    "bin": "noti.exe",
+    "checkver": {
+        "github": "https://github.com/loonghao/noti"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/loonghao/noti/releases/download/v$version/noti-x86_64-pc-windows-msvc.zip"
+            }
+        }
+    }
+}

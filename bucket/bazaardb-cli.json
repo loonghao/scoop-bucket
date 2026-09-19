@@ -1,0 +1,23 @@
+{
+    "version": "1.1.0",
+    "description": "Unofficial local CLI for The Bazaar card snapshots and ten-win combinations",
+    "homepage": "https://github.com/loonghao/bazaardb-cli",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/loonghao/bazaardb-cli/releases/download/v1.1.0/bazaardb-cli-v1.1.0-x86_64-pc-windows-msvc.zip",
+            "hash": "6832d07b48a01ee7572ce77ac7180295335fa9ede31ee0cc40fada6de9b47a2c"
+        }
+    },
+    "bin": "bazaardb-cli.exe",
+    "checkver": {
+        "github": "https://github.com/loonghao/bazaardb-cli"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/loonghao/bazaardb-cli/releases/download/v$version/bazaardb-cli-v$version-x86_64-pc-windows-msvc.zip"
+            }
+        }
+    }
+}
