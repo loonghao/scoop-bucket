@@ -36,6 +36,11 @@ BUCKET_DIR = Path(__file__).resolve().parent.parent / "bucket"
 API_ROOT = "https://api.github.com"
 CHUNK = 1 << 20
 
+# Commit identity for sweep commits. Applied per-invocation via `git -c`, so the
+# sweep works on runners that have no global git identity configured.
+COMMIT_AUTHOR_NAME = "loonghao"
+COMMIT_AUTHOR_EMAIL = "hal.long@outlook.com"
+
 # Accepts "owner/repo", a github.com URL, or an SSH remote.
 _REPO_RE = re.compile(
     r"^(?:https?://(?:www\.)?github\.com/|git@github\.com:)?"
@@ -250,7 +255,18 @@ def commit_changes(message: str) -> bool:
     if staged.returncode == 0:
         print("  nothing staged; no commit created")
         return False
-    git("commit", "-m", message)
+    # The identity is passed with -c rather than written to git config: CI
+    # runners have no user.name/user.email, and without it git commit exits 128
+    # ("Author identity unknown"). -c also leaves the repository config clean.
+    git(
+        "-c",
+        f"user.name={COMMIT_AUTHOR_NAME}",
+        "-c",
+        f"user.email={COMMIT_AUTHOR_EMAIL}",
+        "commit",
+        "-m",
+        message,
+    )
     return True
 
 
