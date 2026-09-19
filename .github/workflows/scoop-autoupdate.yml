@@ -12,6 +12,9 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
     inputs:
       dry_run:
         description: 'Report available updates without opening a PR'
@@ -31,7 +34,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Manifest changes are validated on every PR: unit tests plus a full sweep in
+  # dry-run mode, which proves each checkver still resolves and every pinned
+  # version matches its upstream release.
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install test dependencies
+        run: python3 -m pip install --quiet pytest
+
+      - name: Run tests
+        run: python3 -m pytest tests/ -q
+
+      - name: Sweep manifests (dry run)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/scoop_update.py --dry-run
+
   autoupdate:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
