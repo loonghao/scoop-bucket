@@ -1,12 +1,12 @@
 {
-    "version": "0.2.15",
+    "version": "0.2.16",
     "description": "Portable MSVC Build Tools installer and manager for Rust development",
     "homepage": "https://github.com/loonghao/msvc-kit",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/loonghao/msvc-kit/releases/download/v0.2.15/msvc-kit-x86_64-windows.exe",
-            "hash": "a8592e8a40aa8958ccdfecb7b81d653a5bba2832261589eb2c343376643184da"
+            "url": "https://github.com/loonghao/msvc-kit/releases/download/v0.2.16/msvc-kit-x86_64-windows.exe",
+            "hash": "61f1bcfa8a296e73d41b3316ea03fa0e9ae84d6ace96666fd00b62fbd0f64d8a"
         }
     },
     "bin": [
