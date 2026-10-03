@@ -1,16 +1,16 @@
 {
-    "version": "0.1.6",
+    "version": "0.1.7",
     "description": "Rust-based tool to compile Python modules to pyd files",
     "homepage": "https://github.com/loonghao/py2pyd",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/loonghao/py2pyd/releases/download/v0.1.6/py2pyd-x86_64-pc-windows-msvc.zip",
-            "hash": "8d22646bb13116bba378cf504f3abfef112ba2d8dcde5876178c89dea9404a43"
+            "url": "https://github.com/loonghao/py2pyd/releases/download/v0.1.7/py2pyd-x86_64-pc-windows-msvc.zip",
+            "hash": "d87a301084694dc313d27c5a1ad8e311cd2405102509b1266a22b7352ac0ff0d"
         },
         "arm64": {
-            "url": "https://github.com/loonghao/py2pyd/releases/download/v0.1.6/py2pyd-aarch64-pc-windows-msvc.zip",
-            "hash": "299e4f64ac894558b8286c71e83780f4f572f8647baa48400ff2d5108591e9c0"
+            "url": "https://github.com/loonghao/py2pyd/releases/download/v0.1.7/py2pyd-aarch64-pc-windows-msvc.zip",
+            "hash": "d4b5c36e9c00eabf3228b1b20f558ae5001e42972b08a9e925181558e503e354"
         }
     },
     "bin": "py2pyd.exe",
