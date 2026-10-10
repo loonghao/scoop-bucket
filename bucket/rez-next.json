@@ -1,12 +1,12 @@
 {
-    "version": "0.3.6",
+    "version": "0.3.10",
     "description": "Experimental Rust rewrite of Rez package manager core components",
     "homepage": "https://github.com/loonghao/rez-next",
     "license": "Apache-2.0",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/loonghao/rez-next/releases/download/v0.3.6/rez-next-x86_64-pc-windows-msvc.zip",
-            "hash": "4041db25d6c8f9452a643322d241a03a4c155f31466678df6104b8d8219c3b12"
+            "url": "https://github.com/loonghao/rez-next/releases/download/v0.3.10/rez-next-x86_64-pc-windows-msvc.zip",
+            "hash": "16130015cecc81c429de78a9fb4a4270d062b744320785064ea235634c8810fe"
         }
     },
     "bin": [

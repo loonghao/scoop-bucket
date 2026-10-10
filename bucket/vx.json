@@ -1,12 +1,12 @@
 {
-    "version": "0.9.32",
+    "version": "0.9.37",
     "description": "Universal development tool manager",
     "homepage": "https://github.com/loonghao/vx",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/loonghao/vx/releases/download/v0.9.32/vx-x86_64-pc-windows-msvc.zip",
-            "hash": "38edc9a825243eab3c854c09d50188ad173a8cc874655be048d6102c4ec80d31"
+            "url": "https://github.com/loonghao/vx/releases/download/v0.9.37/vx-x86_64-pc-windows-msvc.zip",
+            "hash": "ccc8237ddca44a2058a3582923abddd5e5a1b8c452eae587f98ebe0edc722bbb"
         }
     },
     "bin": "vx.exe",
